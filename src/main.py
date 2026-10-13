@@ -30,6 +30,16 @@ GLETSCHER = "#7FB7BE"
 FELS = "#5C6670"
 GOLD = "#C9A227"
 
+# Themenabhängige Farben (passen sich an Hell/Dunkel an)
+TEXT_LEISE = ft.Colors.ON_SURFACE_VARIANT
+AKZENT = ft.Colors.PRIMARY
+
+DARSTELLUNG = {  # Modus -> (ThemeMode, Icon, Bezeichnung, nächster Modus)
+    "system": (ft.ThemeMode.SYSTEM, ft.Icons.BRIGHTNESS_AUTO, "wie System", "hell"),
+    "hell": (ft.ThemeMode.LIGHT, ft.Icons.LIGHT_MODE, "hell", "dunkel"),
+    "dunkel": (ft.ThemeMode.DARK, ft.Icons.DARK_MODE, "dunkel", "system"),
+}
+
 MONATE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
@@ -95,6 +105,17 @@ class Datenbank:
             self.con.execute(
                 "INSERT INTO einstellungen VALUES ('ticketpreis', ?) "
                 "ON CONFLICT(schluessel) DO UPDATE SET wert = excluded.wert", (str(wert),))
+
+    def einstellung(self, schluessel: str, standard: str) -> str:
+        row = self.con.execute(
+            "SELECT wert FROM einstellungen WHERE schluessel = ?", (schluessel,)).fetchone()
+        return row["wert"] if row else standard
+
+    def set_einstellung(self, schluessel: str, wert: str):
+        with self.con:
+            self.con.execute(
+                "INSERT INTO einstellungen VALUES (?, ?) "
+                "ON CONFLICT(schluessel) DO UPDATE SET wert = excluded.wert", (schluessel, wert))
 
     # Besuche
     def besuch_anlegen(self, datum_iso: str, ort: str, preis: float):
@@ -186,12 +207,16 @@ def zahl(text: str) -> float:
 # ---------------------------------------------------------------- UI
 def main(page: ft.Page):
     page.title = "Freizeitticket-Bilanz"
-    page.theme_mode = ft.ThemeMode.LIGHT
     page.theme = ft.Theme(color_scheme_seed=GRUEN)
+    page.dark_theme = ft.Theme(color_scheme_seed=GRUEN)
     page.padding = 16
     page.scroll = ft.ScrollMode.AUTO
 
     db = Datenbank(DB_FILE)
+    modus = db.einstellung("darstellung", "system")
+    if modus not in DARSTELLUNG:
+        modus = "system"
+    page.theme_mode = DARSTELLUNG[modus][0]
     picker = ft.FilePicker()
     share = ft.Share()
 
@@ -199,11 +224,12 @@ def main(page: ft.Page):
         page.show_dialog(ft.SnackBar(ft.Text(text)))
 
     # Bilanz-Kopf
-    gesamt_text = ft.Text(size=40, weight=ft.FontWeight.BOLD, color=GRUEN)
+    gesamt_text = ft.Text(size=40, weight=ft.FontWeight.BOLD, color=AKZENT)
     status_text = ft.Text(size=16)
-    fortschritt = ft.ProgressBar(value=0, bar_height=12, color=GRUEN,
-                                 bgcolor=GLETSCHER, border_radius=6)
-    statistik = ft.Text(size=13, color=FELS)
+    fortschritt = ft.ProgressBar(value=0, bar_height=12, color=AKZENT,
+                                 bgcolor=ft.Colors.with_opacity(0.35, GLETSCHER),
+                                 border_radius=6)
+    statistik = ft.Text(size=13, color=TEXT_LEISE)
     ticket_feld = ft.TextField(label="Ticketpreis", value=f"{db.ticketpreis():.0f}",
                                suffix="€", keyboard_type=ft.KeyboardType.NUMBER,
                                width=140, dense=True)
@@ -218,12 +244,12 @@ def main(page: ft.Page):
         height=230,
         interactive=True,
         animation=ft.Animation(600, ft.AnimationCurve.EASE_OUT),
-        horizontal_grid_lines=fch.ChartGridLines(color=ft.Colors.with_opacity(0.15, FELS), width=1),
+        horizontal_grid_lines=fch.ChartGridLines(color=ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE), width=1),
         bottom_axis=fch.ChartAxis(label_size=28),
         left_axis=fch.ChartAxis(label_size=56),
         tooltip=fch.BarChartTooltip(bgcolor=ft.Colors.with_opacity(0.9, GRUEN)),
     )
-    diagramm_hinweis = ft.Text(size=12, color=FELS)
+    diagramm_hinweis = ft.Text(size=12, color=TEXT_LEISE)
     meilenstein_zeile = ft.Row(wrap=True, spacing=6, run_spacing=6)
 
     liste = ft.Column(spacing=0)
@@ -237,10 +263,10 @@ def main(page: ft.Page):
         fortschritt.value = min(summe / ticket, 1) if ticket > 0 else 0
         if summe >= ticket:
             status_text.value = f"Gelohnt – {euro(summe - ticket)} gespart."
-            status_text.color = GRUEN
+            status_text.color = AKZENT
         else:
             status_text.value = f"Noch {euro(ticket - summe)} bis das Ticket drin ist."
-            status_text.color = FELS
+            status_text.color = TEXT_LEISE
         if 0 < anzahl and summe < ticket:
             noch = math.ceil((ticket - summe) / (summe / anzahl))
             status_text.value += f" Bei deinem Schnitt noch etwa {noch} Besuche."
@@ -255,9 +281,9 @@ def main(page: ft.Page):
         erreicht = erreichte_meilensteine(db)
         meilenstein_zeile.controls = [
             ft.Chip(
-                label=ft.Text(name, color=GRUEN if name in erreicht else FELS),
-                leading=ft.Icon(icon, color=GOLD if name in erreicht else ft.Colors.with_opacity(0.3, FELS)),
-                bgcolor="#FFF6D9" if name in erreicht else None,
+                label=ft.Text(name, color=AKZENT if name in erreicht else TEXT_LEISE),
+                leading=ft.Icon(icon, color=GOLD if name in erreicht else ft.Colors.with_opacity(0.4, TEXT_LEISE)),
+                bgcolor=ft.Colors.with_opacity(0.18, GOLD) if name in erreicht else None,
                 tooltip="Erreicht" if name in erreicht else "Noch offen",
             )
             for name, icon, _ in MEILENSTEINE
@@ -306,7 +332,7 @@ def main(page: ft.Page):
         diagramm.groups = [
             fch.BarChartGroup(x=i, rods=[fch.BarChartRod(
                 from_y=0, to_y=wert, width=16, border_radius=4,
-                color=GOLD if wert >= ticket else GRUEN,
+                color=GOLD if wert >= ticket else AKZENT,
                 bg_from_y=0, bg_to_y=ticket, bgcolor=ft.Colors.with_opacity(0.25, GLETSCHER),
                 tooltip=f"{MONATE[int(m[5:]) - 1]} {m[:4]}\n+{euro(summen.get(m, 0))}\ngesamt {euro(wert)}",
             )])
@@ -424,9 +450,25 @@ def main(page: ft.Page):
     ticket_feld.on_submit = ticket_geaendert
     preis_feld.on_submit = hinzufuegen
 
+    def darstellung_knopf():
+        _, icon, name, _ = DARSTELLUNG[modus]
+        return icon, f"Darstellung: {name} (tippen zum Wechseln)"
+
+    def darstellung_wechseln(e):
+        nonlocal modus
+        modus = DARSTELLUNG[modus][3]
+        db.set_einstellung("darstellung", modus)
+        page.theme_mode = DARSTELLUNG[modus][0]
+        darstellung_btn.icon, darstellung_btn.tooltip = darstellung_knopf()
+        meldung(f"Darstellung: {DARSTELLUNG[modus][2]}")
+        page.update()
+
+    icon, tip = darstellung_knopf()
+    darstellung_btn = ft.IconButton(icon=icon, tooltip=tip, on_click=darstellung_wechseln)
+
     page.appbar = ft.AppBar(
         title=ft.Text("Freizeitticket"),
-        actions=[ft.PopupMenuButton(items=[
+        actions=[darstellung_btn, ft.PopupMenuButton(items=[
             ft.PopupMenuItem(content="Backup teilen (z. B. Drive)", icon=ft.Icons.SHARE,
                              on_click=backup_teilen),
             ft.PopupMenuItem(content="Backup speichern unter …", icon=ft.Icons.SAVE_ALT,
@@ -439,11 +481,11 @@ def main(page: ft.Page):
     page.add(
         ft.Container(
             content=ft.Column([
-                ft.Row([ft.Text("Ersparter Eintritt", size=14, color=FELS), ticket_feld],
+                ft.Row([ft.Text("Ersparter Eintritt", size=14, color=TEXT_LEISE), ticket_feld],
                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 gesamt_text, fortschritt, status_text, statistik,
             ], spacing=8),
-            padding=20, border_radius=16, bgcolor="#EAF3F1",
+            padding=20, border_radius=16, bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
         ),
         ft.Text("Deine Saison", size=18, weight=ft.FontWeight.W_600),
         diagramm,
