@@ -1,0 +1,17 @@
+[project]
+name = "freizeitticket"
+version = "1.0.0"
+description = "Hat sich mein Freizeitticket gelohnt?"
+requires-python = ">=3.10"
+dependencies = [
+    "flet==1.0.4",
+    "flet-charts==1.0.4",
+]
+
+[tool.flet]
+product = "Freizeitticket"
+org = "at.guenter"
+company = "Günter"
+
+[tool.flet.app]
+path = "src"
