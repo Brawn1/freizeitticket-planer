@@ -1,0 +1,44 @@
+name: APK bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # manuell starten: Actions → "APK bauen" → Run workflow
+
+permissions:
+  contents: write      # nötig, um das Release mit der APK anzulegen
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Flet-CLI installieren
+        run: pip install "flet[cli]==1.0.4"
+
+      # Flet lädt Flutter selbst herunter, das Android-SDK ist auf dem Runner vorinstalliert
+      - name: APK bauen
+        run: flet build apk --yes --no-rich-output --arch arm64-v8a
+
+      - name: APK als Artefakt ablegen
+        uses: actions/upload-artifact@v4
+        with:
+          name: freizeitticket-apk
+          path: build/apk/*.apk
+
+      - name: Release mit APK anlegen (direkt am Handy ladbar)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Freizeitticket Build ${{ github.run_number }}
+          files: build/apk/*.apk
