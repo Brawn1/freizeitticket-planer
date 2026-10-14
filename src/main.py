@@ -294,6 +294,7 @@ def main(page: ft.Page):
     meilenstein_zeile = ft.Row(wrap=True, spacing=6, run_spacing=6)
 
     liste = ft.Column(spacing=0)
+    verlauf_kopf = ft.Text(size=13, color=TEXT_LEISE)
     orte_zeile = ft.Row(wrap=True, spacing=6, run_spacing=6)
 
     def aktualisieren():
@@ -336,19 +337,39 @@ def main(page: ft.Page):
             for r in db.letzte_preise_pro_ort()
         ]
 
-        liste.controls = [
-            ft.ListTile(
+        verlauf_bauen()
+        page.update()
+
+    def verlauf_bauen():
+        """Alle Besuche, neueste zuerst, nach Monat gruppiert mit Monatssumme."""
+        besuche = db.besuche()
+        verlauf_kopf.value = (f"{len(besuche)} Besuche insgesamt" if besuche
+                              else "Noch keine Besuche – erfasse deinen ersten in der Übersicht.")
+        monats_summe = {r["monat"]: r["summe"] for r in db.monats_summen()}
+        liste.controls = []
+        aktueller_monat = None
+        for b in besuche:
+            monat = b["datum"][:7]
+            if monat != aktueller_monat:
+                aktueller_monat = monat
+                liste.controls.append(ft.Container(
+                    content=ft.Row([
+                        ft.Text(f"{MONATE[int(monat[5:]) - 1]} {monat[:4]}",
+                                size=15, weight=ft.FontWeight.W_600, color=AKZENT),
+                        ft.Text(euro(monats_summe.get(monat, 0)), color=TEXT_LEISE),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    padding=ft.Padding(16, 18, 16, 4),
+                ))
+            tag = datetime.strptime(b["datum"], "%Y-%m-%d").date()
+            liste.controls.append(ft.ListTile(
                 title=ft.Text(b["ort"]),
-                subtitle=ft.Text(datetime.strptime(b["datum"], "%Y-%m-%d").strftime("%d.%m.%Y")),
+                subtitle=ft.Text(datum_anzeige(tag)),
                 trailing=ft.Row(
                     [ft.Text(euro(b["preis"]), weight=ft.FontWeight.W_500),
                      ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, tooltip="Besuch löschen",
-                                   on_click=lambda e, i=b["id"]: loeschen(i))],
+                                   on_click=lambda e, b=b, tag=tag: loeschen_fragen(b, tag))],
                     tight=True),
-            )
-            for b in db.besuche()
-        ]
-        page.update()
+            ))
 
     def diagramm_bauen(ticket):
         """Kumulierte Ersparnis pro Monat; der helle Hintergrundbalken ist das Ziel."""
@@ -424,9 +445,19 @@ def main(page: ft.Page):
         if neu:
             meldung("Meilenstein erreicht: " + ", ".join(neu) + " 🏆")
 
-    def loeschen(besuch_id):
-        db.besuch_loeschen(besuch_id)
-        aktualisieren()
+    def loeschen_fragen(b, tag):
+        def ja(e):
+            page.pop_dialog()
+            db.besuch_loeschen(b["id"])
+            aktualisieren()
+            meldung("Besuch gelöscht.")
+
+        page.show_dialog(ft.AlertDialog(
+            title=ft.Text("Besuch löschen?"),
+            content=ft.Text(f"{b['ort']} am {datum_anzeige(tag)} ({euro(b['preis'])})"),
+            actions=[ft.TextButton("Abbrechen", on_click=lambda e: page.pop_dialog()),
+                     ft.FilledButton("Löschen", on_click=ja)],
+        ))
 
     def ticket_geaendert(e):
         try:
@@ -516,7 +547,7 @@ def main(page: ft.Page):
         ])],
     )
 
-    page.add(
+    uebersicht = ft.Column([
         ft.Container(
             content=ft.Column([
                 ft.Row([ft.Text("Ersparter Eintritt", size=14, color=TEXT_LEISE), ticket_feld],
@@ -536,9 +567,31 @@ def main(page: ft.Page):
         ft.Row([preis_feld, datum_feld,
                 ft.FilledButton("Besuch speichern", icon=ft.Icons.ADD, on_click=hinzufuegen)],
                wrap=True),
-        ft.Divider(),
+    ], spacing=10)
+
+    verlauf = ft.Column([
+        ft.Text("Verlauf", size=22, weight=ft.FontWeight.W_600),
+        verlauf_kopf,
         liste,
+    ], spacing=4, visible=False)
+
+    def seite_wechseln(e):
+        index = page.navigation_bar.selected_index
+        uebersicht.visible = index == 0
+        verlauf.visible = index == 1
+        page.update()
+
+    page.navigation_bar = ft.NavigationBar(
+        selected_index=0,
+        on_change=seite_wechseln,
+        destinations=[
+            ft.NavigationBarDestination(icon=ft.Icons.INSIGHTS_OUTLINED,
+                                        selected_icon=ft.Icons.INSIGHTS, label="Übersicht"),
+            ft.NavigationBarDestination(icon=ft.Icons.HISTORY, label="Verlauf"),
+        ],
     )
+
+    page.add(uebersicht, verlauf)
     aktualisieren()
 
 
