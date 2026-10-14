@@ -26,9 +26,31 @@ jobs:
       - name: Flet-CLI installieren
         run: pip install "flet[cli]==1.0.4"
 
-      # Flet lädt Flutter selbst herunter, das Android-SDK ist auf dem Runner vorinstalliert
-      - name: APK bauen
+      # Keystore aus dem Secret holen – liegt außerhalb des Projekts,
+      # damit er nie in die App gepackt oder ins Repo committet wird.
+      - name: Signaturschlüssel bereitstellen
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 fehlt – Build abgebrochen, damit keine falsch signierte APK entsteht."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "FLET_ANDROID_SIGNING_KEY_STORE=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
+
+      # Flet lädt Flutter selbst herunter, das Android-SDK ist auf dem Runner vorinstalliert.
+      # Die Signatur-Daten liest flet build aus den Umgebungsvariablen.
+      - name: APK bauen und signieren
+        env:
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: flet build apk --yes --no-rich-output --arch arm64-v8a
+
+      - name: Keystore entfernen
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks"
 
       - name: APK als Artefakt ablegen
         uses: actions/upload-artifact@v4

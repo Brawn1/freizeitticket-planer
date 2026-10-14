@@ -40,6 +40,8 @@ DARSTELLUNG = {  # Modus -> (ThemeMode, Icon, Bezeichnung, nächster Modus)
     "dunkel": (ft.ThemeMode.DARK, ft.Icons.DARK_MODE, "dunkel", "system"),
 }
 
+WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
 MONATE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
           "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
@@ -200,6 +202,10 @@ def monatsliste(von: str, bis: str) -> list[str]:
     return monate[-12:]
 
 
+def datum_anzeige(tag: date) -> str:
+    return f"{WOCHENTAGE[tag.weekday()]}, {tag:%d.%m.%Y}"
+
+
 def zahl(text: str) -> float:
     return float(text.strip().replace("€", "").replace(",", "."))
 
@@ -209,6 +215,11 @@ def main(page: ft.Page):
     page.title = "Freizeitticket-Bilanz"
     page.theme = ft.Theme(color_scheme_seed=GRUEN)
     page.dark_theme = ft.Theme(color_scheme_seed=GRUEN)
+    # Deutsche Texte im Kalender (Monatsnamen, Wochentage, Buttons)
+    page.locale_configuration = ft.LocaleConfiguration(
+        supported_locales=[ft.Locale("de", "AT"), ft.Locale("de")],
+        current_locale=ft.Locale("de", "AT"),
+    )
     page.padding = 16
     page.scroll = ft.ScrollMode.AUTO
 
@@ -238,7 +249,37 @@ def main(page: ft.Page):
     ort_feld = ft.TextField(label="Wo warst du?", hint_text="z. B. Patscherkofelbahn", expand=True)
     preis_feld = ft.TextField(label="Normalpreis", suffix="€",
                               keyboard_type=ft.KeyboardType.NUMBER, width=130)
-    datum_feld = ft.TextField(label="Datum", value=date.today().strftime("%d.%m.%Y"), width=130)
+    gewaehlter_tag = date.today()
+
+    def kalender_oeffnen(e):
+        kalender.value = datetime.combine(gewaehlter_tag, datetime.min.time())
+        kalender.last_date = datetime.combine(date.today(), datetime.min.time())
+        page.show_dialog(kalender)
+
+    def tag_gewaehlt(e):
+        nonlocal gewaehlter_tag
+        wert = kalender.value
+        if wert is None:
+            return
+        # Flet liefert je nach Plattform UTC oder lokale Zeit -> auf lokales Datum bringen
+        gewaehlter_tag = wert.astimezone().date() if wert.tzinfo else wert.date()
+        datum_feld.value = datum_anzeige(gewaehlter_tag)
+        page.update()
+
+    kalender = ft.DatePicker(
+        first_date=datetime(date.today().year - 2, 1, 1),
+        last_date=datetime.combine(date.today(), datetime.min.time()),
+        locale=ft.Locale("de", "AT"),
+        help_text="Wann warst du dort?",
+        cancel_text="Abbrechen",
+        confirm_text="Übernehmen",
+        on_change=tag_gewaehlt,
+    )
+
+    datum_feld = ft.TextField(
+        label="Datum", value=datum_anzeige(gewaehlter_tag), width=170,
+        read_only=True, suffix_icon=ft.Icons.CALENDAR_MONTH, on_click=kalender_oeffnen,
+    )
 
     diagramm = fch.BarChart(
         height=230,
@@ -356,7 +397,8 @@ def main(page: ft.Page):
         page.update()
 
     def hinzufuegen(e):
-        for f in (ort_feld, preis_feld, datum_feld):
+        nonlocal gewaehlter_tag
+        for f in (ort_feld, preis_feld):
             f.error = None
         ok = True
         if not ort_feld.value.strip():
@@ -369,18 +411,14 @@ def main(page: ft.Page):
         except ValueError:
             preis_feld.error = "Betrag z. B. 24,50"
             ok = False
-        try:
-            tag = datetime.strptime(datum_feld.value.strip(), "%d.%m.%Y").date()
-        except ValueError:
-            datum_feld.error = "TT.MM.JJJJ"
-            ok = False
         if not ok:
             page.update()
             return
         vorher = erreichte_meilensteine(db)
-        db.besuch_anlegen(tag.isoformat(), ort_feld.value.strip(), preis)
+        db.besuch_anlegen(gewaehlter_tag.isoformat(), ort_feld.value.strip(), preis)
         ort_feld.value = preis_feld.value = ""
-        datum_feld.value = date.today().strftime("%d.%m.%Y")
+        gewaehlter_tag = date.today()
+        datum_feld.value = datum_anzeige(gewaehlter_tag)
         aktualisieren()
         neu = [n for n, _, _ in MEILENSTEINE if n in erreichte_meilensteine(db) - vorher]
         if neu:
